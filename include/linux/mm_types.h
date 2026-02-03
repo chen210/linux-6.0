@@ -69,6 +69,31 @@ struct mem_cgroup;
 #define _struct_page_alignment
 #endif
 
+/*
+ * flags: 用于identify 页面特性，包含了页的attributes可以从中获得当前页的zone
+ *		和node
+ * metedata: 64bit 占用40byte, 根据page的用途使用union中的不同成员，当用在'slab'
+ *		页面时，struct page整个in cast to struct slab
+ * 其中的flags, _refcount, memcg_data都是shares 成员
+ * 如果page不用在slab, 则由_mapcount变量组成的联合体，该成员用于统计在userland
+ * page table映射次数，需要通过page_mapcount() api访问
+ * _refcount: 根据此变量determine page can free
+ * memcg_data: store data memory cgroup, pointer memory cgoup data structure
+ *
+ * 结构体总64byte, typical size of L1 cache line
+ * 一个struct page 表示内核中smallest page size, 在分配页块时，需要将多个页复合
+ * (compound)成page block, 我们称复合页的第一个页为head page,最后一个页为tail 
+ * page
+ * compound page always consis of a power-of-two number base pages
+ * 分配高阶页没有使用复合页时，分配页的owner必须知道那个struct page能够represents
+ * 这个高阶页。
+ * 如果要申请复合页，必须使用__GFP_COMP这个标志
+ *
+ * 当使用struct page作为函数参数时，无法保证它不是尾页，一旦传入尾页，因为缺乏
+ * metadata, 系统会出现panic，老的对策是调用compound_head()检查是否是尾页，如果
+ * 是尾页，则返回它的head page。新的对策是使用struct folio, folio与page maps 
+ * one to one, 但是是非复合页或是head page
+ */
 struct page {
 	unsigned long flags;		/* Atomic flags, some possibly
 					 * updated asynchronously */
@@ -100,7 +125,14 @@ struct page {
 				struct list_head buddy_list;
 				struct list_head pcp_list;
 			};
-			/* See page-flags.h for PAGE_MAPPING_FLAGS */
+			/* See page-flags.h for PAGE_MAPPING_FLAGS 
+			 * 根据最低2bit的flags，表示mapping 指向的数据结构
+			 * 如果是页面缓存，如预期一样，mapping指向address_space
+			 * 如果是PAGE_MAPPING_ANON, 指向anon_vma
+			 * 如果是PAGE_MAPPING_MOVABLE, 指向 movable_operations
+			 * 如果是PAGE_MAPPing_KSM, 指向ksm data
+			 * 如果page是tail page, mapping pointer to poisoned key
+			 */
 			struct address_space *mapping;
 			pgoff_t index;		/* Our offset within mapping. */
 			/**
@@ -133,12 +165,15 @@ struct page {
 				atomic_long_t pp_frag_count;
 			};
 		};
+
+		/* 如果是compound page, 第一个tail page需要包含下面的信息 */
 		struct {	/* Tail pages of compound page */
 			unsigned long compound_head;	/* Bit zero is set */
 
 			/* First tail page only */
 			unsigned char compound_dtor;
 			unsigned char compound_order;
+			/* 初始设置为-1，表示没有establish */
 			atomic_t compound_mapcount;
 			atomic_t compound_pincount;
 #ifdef CONFIG_64BIT
@@ -149,6 +184,7 @@ struct page {
 			unsigned long _compound_pad_1;	/* compound_head */
 			unsigned long _compound_pad_2;
 			/* For both global and memcg */
+			/* used by transparent huge page */
 			struct list_head deferred_list;
 		};
 		struct {	/* Page table pages */
