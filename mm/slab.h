@@ -6,6 +6,12 @@
  */
 
 /* Reuses the bits in struct page */
+/*
+ * slab 和 page可以相互转化，因此需要注意slab_list,rcu_head lsb不能设置为1，
+ * 否则在转化为page时，复合页检测逻辑会出错。
+ * slab转化为page后，slab_cache指针和page->mapping地址相同, 而mapping的低2bit
+ * 有特殊的用途，需要注意.
+ * */
 struct slab {
 	unsigned long __page_flags;
 
@@ -16,8 +22,11 @@ struct slab {
 		struct rcu_head rcu_head;
 	};
 	struct kmem_cache *slab_cache;
+	/* fifo queue */
 	void *freelist;	/* array of free object indexes */
+	/* freelist 索引的基地址 */
 	void *s_mem;	/* first object */
+	/* slab active objects 数量 */
 	unsigned int active;
 
 #elif defined(CONFIG_SLUB)
@@ -27,6 +36,10 @@ struct slab {
 		struct rcu_head rcu_head;
 #ifdef CONFIG_SLUB_CPU_PARTIAL
 		struct {
+			/* 
+			 * 如果当前slab object represents 整个cache的一部分，
+			 * next指向下一个slab object
+			 */
 			struct slab *next;
 			int slabs;	/* Nr of slabs left */
 		};
@@ -34,6 +47,11 @@ struct slab {
 	};
 	struct kmem_cache *slab_cache;
 	/* Double-word boundary */
+	/* 
+	 * 每个cpu的本地缓存都有一个freelist链表，当使用当前cpu的本地freelist
+	 * 时，不需要加锁，直接使用，但是当freelist耗尽时，需要从slab拿新的对象
+	 * 则需要加锁
+	 */
 	void *freelist;		/* first free object */
 	union {
 		unsigned long counters;
