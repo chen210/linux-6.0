@@ -168,9 +168,11 @@ struct page {
 
 		/* 如果是compound page, 第一个tail page需要包含下面的信息 */
 		struct {	/* Tail pages of compound page */
+                        /* pointer to the head page, and lower bit is set 1 */
 			unsigned long compound_head;	/* Bit zero is set */
 
 			/* First tail page only */
+                        /* 根据析构的标志，调用不同的析构函数，即free函数 */
 			unsigned char compound_dtor;
 			unsigned char compound_order;
 			/* 初始设置为-1，表示没有establish */
