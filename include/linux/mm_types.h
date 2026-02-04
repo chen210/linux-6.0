@@ -187,21 +187,37 @@ struct page {
 			/* used by transparent huge page */
 			struct list_head deferred_list;
 		};
-		struct {	/* Page table pages */
-			unsigned long _pt_pad_1;	/* compound_head */
+		struct { /* Page table pages */
+			/* 
+			 * 与compound_head在同样的内存位置，因此
+			 * lsb设置为0，表示不是复合页 
+			 */
+			unsigned long _pt_pad_1; /* compound_head */
+			/* huge page场景，pmd fallback pte */
 			pgtable_t pmd_huge_pte; /* protected by page->ptl */
 			unsigned long _pt_pad_2;	/* mapping */
 			union {
+				/* x86 特有，pointer to pgd */
 				struct mm_struct *pt_mm; /* x86 pgds only */
 				atomic_t pt_frag_refcount; /* powerpc */
 			};
 #if ALLOC_SPLIT_PTLOCKS
 			spinlock_t *ptl;
 #else
+			/* 
+			 * pgtable synchronous change 需要锁
+			 * 早期的内核不论cpu数量都公用一把锁，核心数量过多会引发
+			 * 性能问题, 因此现在使用拆分锁，将每个pte单独使用一个
+			 * 锁
+			 */
 			spinlock_t ptl;
 #endif
 		};
-		struct {	/* ZONE_DEVICE pages */
+		/* 
+		 * 用于管理不属于buddy管理的设备内存，同时又能使用DMA，
+		 * 虚拟内存映射 
+		 */
+		struct { /* ZONE_DEVICE pages */
 			/** @pgmap: Points to the hosting device page map. */
 			struct dev_pagemap *pgmap;
 			void *zone_device_data;
@@ -215,6 +231,7 @@ struct page {
 			 * use the mapping, index, and private fields when
 			 * pmem backed DAX files are mapped.
 			 */
+			/* ZONE_DEVICE pages还会使用mapping, index, private */
 		};
 
 		/** @rcu_head: You can use this to free a page by RCU. */
