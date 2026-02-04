@@ -305,6 +305,10 @@ struct page {
  * power-of-two.  It may be mapped into userspace at an address which is
  * at an arbitrary page offset, but its kernel virtual address is aligned
  * to its size.
+ * struct folio解决了使用page必须要先检查是否是复合页，通过explicitly
+ * guaranteed 是一个page，而不是复合页的。与struct page可以相互转化。
+ * 在使用struct page包装的函数，后面会 will remove the kernel, 同时修改为使用
+ * struct folio参数
  */
 struct folio {
 	/* private: don't document the anon union */

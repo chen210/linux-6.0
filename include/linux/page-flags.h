@@ -210,9 +210,26 @@ DECLARE_STATIC_KEY_FALSE(hugetlb_optimize_vmemmap_key);
 /*
  * Return the real head page struct iff the @page is a fake head page, otherwise
  * return the @page itself. See Documentation/mm/vmemmap_dedup.rst.
+ * 为了处理HVO或DAX(direct access，可以将高速设备直接映射到用户空间虚拟
+ *	地址，进行直接访问 ZONE_DEVICE)的page。
+ * HVO: hugeTLB Vmemmap optimization，为了优化表示巨页所占用的空间，正常每一个
+ *	4K页都需要一个64byte的进行表示，因此512个页需要32K内存表示，但是在巨页
+ *	的场景下，只有前几个struct page是有效信息，后面的只是单纯指向page head,
+ *	因此这里提出一个优化，将后面的内核虚拟地址空间(vmemmap)的页表映射到同一
+ *	个物理空间上。
+ *	NOTE: 这里存在一个副作用，page可能是一个只读副本，不再有实际的信息，因
+ *	此需要fix，这里比较困惑的地址在于，表示512个page,需要32K内存8个page, 通
+ *	过HVO,将后6个page虚拟映射到第一个物理page上面，保留2个page。为什么保留
+ *	2个page, 而不是直接使用3个64byte表示这512个page? 实际很多结构会直接访问
+ *	第一个page后的偏移，如果删除这个page, 在检查复合页的代码逻辑会发生panic,
+ *	为什么不用3个64byte表示，因为页表映射是页为单位的。
+ * 
+ * fake head: 内核为了让noo-compound pages表现的像复合页，会构造一些fake head
+ * fixed fake head: 处理被映射为huge page, 但是在物理上不是compound page的情况
  */
 static __always_inline const struct page *page_fixed_fake_head(const struct page *page)
 {
+	/* 没使用HVO, 直接返回page */
 	if (!static_branch_unlikely(&hugetlb_optimize_vmemmap_key))
 		return page;
 
@@ -221,6 +238,7 @@ static __always_inline const struct page *page_fixed_fake_head(const struct page
 	 * struct page. The alignment check aims to avoid access the fields (
 	 * e.g. compound_head) of the @page[1]. It can avoid touch a (possibly)
 	 * cold cacheline in some cases.
+	 * fake page 地址是对齐的
 	 */
 	if (IS_ALIGNED((unsigned long)page, PAGE_SIZE) &&
 	    test_bit(PG_head, &page->flags)) {
@@ -234,6 +252,7 @@ static __always_inline const struct page *page_fixed_fake_head(const struct page
 		if (likely(head & 1))
 			return (const struct page *)(head - 1);
 	}
+	/* 4K不对齐，或没有PG_head,那就是普通单页，或者就是struct page */
 	return page;
 }
 #else
