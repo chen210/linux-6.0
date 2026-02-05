@@ -1421,6 +1421,10 @@ void subsection_map_init(unsigned long pfn, unsigned long nr_pages);
 
 struct page;
 struct page_ext;
+/*
+ * 在sparse内存模型中，一块连续的物理内存被称为sections,
+ * 每块连续的物理内存都是用struct mem_section表示，从**mem_section中动态分配
+ */
 struct mem_section {
 	/*
 	 * This is, logically, a pointer to an array of struct
