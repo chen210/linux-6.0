@@ -1392,7 +1392,7 @@ static inline unsigned long section_nr_to_pfn(unsigned long sec)
 
 #define SECTION_ALIGN_UP(pfn)	(((pfn) + PAGES_PER_SECTION - 1) & PAGE_SECTION_MASK)
 #define SECTION_ALIGN_DOWN(pfn)	((pfn) & PAGE_SECTION_MASK)
-
+/* subsection hard code 2MB */
 #define SUBSECTION_SHIFT 21
 #define SUBSECTION_SIZE (1UL << SUBSECTION_SHIFT)
 
@@ -1403,6 +1403,7 @@ static inline unsigned long section_nr_to_pfn(unsigned long sec)
 #if SUBSECTION_SHIFT > SECTION_SIZE_BITS
 #error Subsection size exceeds section size
 #else
+/* 一个section下面有64个subsection */
 #define SUBSECTIONS_PER_SECTION (1UL << (SECTION_SIZE_BITS - SUBSECTION_SHIFT))
 #endif
 
@@ -1411,6 +1412,11 @@ static inline unsigned long section_nr_to_pfn(unsigned long sec)
 
 struct mem_section_usage {
 #ifdef CONFIG_SPARSEMEM_VMEMMAP
+	/*
+	 * 一个subsection是2M, 一个section下面有64个subsection，
+	 * 这是指subsection的valid size,而不是page.
+	 * 在early memory initialized时，整个2M会mark为valid。
+	 */
 	DECLARE_BITMAP(subsection_map, SUBSECTIONS_PER_SECTION);
 #endif
 	/* See declaration of similar field in struct zone */
@@ -1422,8 +1428,9 @@ void subsection_map_init(unsigned long pfn, unsigned long nr_pages);
 struct page;
 struct page_ext;
 /*
- * 在sparse内存模型中，一块连续的物理内存被称为sections,
- * 每块连续的物理内存都是用struct mem_section表示，从**mem_section中动态分配
+ * 在sparse内存模型中，一块连续的逻辑区域被称为sections,
+ * 每块连续的逻辑区域都是用struct mem_section表示，从**mem_section中动态分配
+ * 每个section中有效的内存通过bitmap表示
  */
 struct mem_section {
 	/*
@@ -1437,9 +1444,26 @@ struct mem_section {
 	 *
 	 * Making it a UL at least makes someone do a cast
 	 * before using it wrong.
+	 * 一块section最大默认为128M/1G，因为是物理地址连续的，因此
+	 * section_mem_map只需要指向第一个page,即可以记录这个section，同时低
+	 * 6bit记录了SECTION_*的标记。
+	 *  - SECTION_MARKED_PRESENT: 表示有实际的物理内存
+	 *  - SECTION_HAS_MEM_MAP: 表示sction_mem_map指向的page数组是否有效，
+	 *			   可能在热插拔或lazy initialized场景下使用
+	 *  - SECTION_IS_ONLINE: 热插拔内存是否online
+	 *  - SECTION_IS_EARLY: 是否是在内核的early初始化的
+	 *  - SECTION_TAINT_ZONE_DEVICE: 与ONLINE表示连用，ONLINE表示内存可用，
+	 *			该标志表示内存是属于外部设备的，显存等场景。
 	 */
 	unsigned long section_mem_map;
-
+	/*
+	 * pointer to struct mem_section_usage, 因为一个section中可能存在hole,
+	 * 因此需要记录下来，那个4K是否有效，在使用时，先查这个bitmap，避免访问
+	 * 到空洞了
+	 * 同时section进一步分为pageblock, 通过usage->pageblock_flags记录了当前
+	 * 块的migrate type.(迁移类型是以块为单位管理的)，在迁移时可以一次性处理
+	 * 2M(512个page)
+	 */
 	struct mem_section_usage *usage;
 #ifdef CONFIG_PAGE_EXTENSION
 	/*
@@ -1456,6 +1480,7 @@ struct mem_section {
 };
 
 #ifdef CONFIG_SPARSEMEM_EXTREME
+/* sparse 内存模型中，二维数组mem_sections中root index包含的mem_section数量 */
 #define SECTIONS_PER_ROOT       (PAGE_SIZE / sizeof (struct mem_section))
 #else
 #define SECTIONS_PER_ROOT	1
@@ -1606,7 +1631,7 @@ static inline int subsection_map_index(unsigned long pfn)
 static inline int pfn_section_valid(struct mem_section *ms, unsigned long pfn)
 {
 	int idx = subsection_map_index(pfn);
-
+	/* 先找在subsection_map的位置，然后看位图 */
 	return test_bit(idx, ms->usage->subsection_map);
 }
 #else
