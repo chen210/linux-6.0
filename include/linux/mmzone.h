@@ -917,6 +917,7 @@ typedef struct pglist_data {
 	 */
 	struct zonelist node_zonelists[MAX_ZONELISTS];
 
+	/* zone里面至少要有一个page */
 	int nr_zones; /* number of populated zones in this node */
 #ifdef CONFIG_FLATMEM	/* means !SPARSEMEM */
 	struct page *node_mem_map;
@@ -939,6 +940,7 @@ typedef struct pglist_data {
 	 */
 	spinlock_t node_size_lock;
 #endif
+	/* 逻辑上的第一个page，might not be a present page */
 	unsigned long node_start_pfn;
 	unsigned long node_present_pages; /* total number of physical pages */
 	unsigned long node_spanned_pages; /* total size of physical page

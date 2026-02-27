@@ -3936,6 +3936,12 @@ noinline bool should_fail_alloc_page(gfp_t gfp_mask, unsigned int order)
 }
 ALLOW_ERROR_INJECTION(should_fail_alloc_page, TRUE);
 
+/*
+ * 计算这个zone的总空闲页中，有多少unusable_free page
+ * 根据cma和高阶原子页标志，计算真正的空闲页多少即:
+ * - 不使用高阶原子页，则unusable页需要加上预留的高阶原子页
+ * - 不使用cma的区域，则unusable页需要加上预留的cma页
+ */
 static inline long __zone_watermark_unusable_free(struct zone *z,
 				unsigned int order, unsigned int alloc_flags)
 {
@@ -3976,6 +3982,7 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 	/* free_pages may go negative - that's OK */
 	free_pages -= __zone_watermark_unusable_free(z, order, alloc_flags);
 
+	/* high优先级，降低最低水位线 */
 	if (alloc_flags & ALLOC_HIGH)
 		min -= min / 2;
 
@@ -3985,6 +3992,8 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 		 * users on the grounds that it's definitely going to be in
 		 * the exit path shortly and free memory. Any allocation it
 		 * makes during the free path will be small and short-lived.
+		 * HIGH与HARDER一起使用的话，先减少1/2再减少1/4，相当于减少了
+		 * 60%的样子
 		 */
 		if (alloc_flags & ALLOC_OOM)
 			min -= min / 2;
@@ -4036,12 +4045,18 @@ bool zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 					zone_page_state(z, NR_FREE_PAGES));
 }
 
+/*
+ * watermark check的fast path
+ * mark: 要检查的watermark
+ * highest_zoneidx: 标识这个zone的类型，normal, dma, dma32??
+ */
 static inline bool zone_watermark_fast(struct zone *z, unsigned int order,
 				unsigned long mark, int highest_zoneidx,
 				unsigned int alloc_flags, gfp_t gfp_mask)
 {
 	long free_pages;
 
+	/* 从vm_stat统计数据中，获取free pages数量 */
 	free_pages = zone_page_state(z, NR_FREE_PAGES);
 
 	/*
@@ -4057,6 +4072,7 @@ static inline bool zone_watermark_fast(struct zone *z, unsigned int order,
 
 		/* reserved may over estimate high-atomic reserves. */
 		usable_free -= min(usable_free, reserved);
+		/* 这里可用页没有减去低端内存预留页因此这里比较需要加上 */
 		if (usable_free > mark + z->lowmem_reserve[highest_zoneidx])
 			return true;
 	}
@@ -8626,6 +8642,7 @@ static void calculate_totalreserve_pages(void)
 			}
 
 			/* we treat the high watermark as reserved pages. */
+			/* 把高水位线的内存页reserve起来， */
 			max += high_wmark_pages(zone);
 
 			if (max > managed_pages)
@@ -8650,6 +8667,15 @@ static void setup_per_zone_lowmem_reserve(void)
 	struct pglist_data *pgdat;
 	enum zone_type i, j;
 
+/*
+ * zone从DMA -> DMA32 -> normal -> moveable -> device
+ * 相同zone对自己zone不reserve，因此ratio为0
+ * upper_zone会借用当前zone，因此需要设置reserve，根据ratio(256,128等)，reserve
+ * 大小只有upper_zone有关系，因此需要计算upper_zone的managed大小，然后根据ratio
+ * 计算设置reserve的大小
+ * managed_pages += zone_managed_pages(upper_zone);
+ */
+
 	for_each_online_pgdat(pgdat) {
 		for (i = 0; i < MAX_NR_ZONES - 1; i++) {
 			struct zone *zone = &pgdat->node_zones[i];
@@ -8660,6 +8686,7 @@ static void setup_per_zone_lowmem_reserve(void)
 			for (j = i + 1; j < MAX_NR_ZONES; j++) {
 				struct zone *upper_zone = &pgdat->node_zones[j];
 
+				/* managed_page是zone交给buddy分配器管理的大小*/
 				managed_pages += zone_managed_pages(upper_zone);
 
 				if (clear)

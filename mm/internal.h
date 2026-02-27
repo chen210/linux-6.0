@@ -757,6 +757,7 @@ unsigned int reclaim_clean_pages_from_list(struct zone *zone,
 #define ALLOC_WMARK_MIN		WMARK_MIN
 #define ALLOC_WMARK_LOW		WMARK_LOW
 #define ALLOC_WMARK_HIGH	WMARK_HIGH
+/* 不check wmark, OOM killer使用 */
 #define ALLOC_NO_WATERMARKS	0x04 /* don't check watermarks at all */
 
 /* Mask to get the watermark bits */
@@ -773,6 +774,13 @@ unsigned int reclaim_clean_pages_from_list(struct zone *zone,
 #define ALLOC_OOM		ALLOC_NO_WATERMARKS
 #endif
 
+/*
+ * harder: 比high还要高的优先级，更低的水位线，会降低到原来的1/4，并且使用高阶
+ *	   原子预留页
+ * high: 高优先级分配内存,可以使用部分min下的内存，一旦检测到high标志，会将min
+ *	的wmark降低为原来一半
+ * cpuset: 在当前进程cpu node申请内存
+ */
 #define ALLOC_HARDER		 0x10 /* try to alloc harder */
 #define ALLOC_HIGH		 0x20 /* __GFP_HIGH set */
 #define ALLOC_CPUSET		 0x40 /* check for correct cpuset */
