@@ -207,8 +207,13 @@ extern pmd_t *mm_find_pmd(struct mm_struct *mm, unsigned long address);
  * by a const pointer.
  */
 struct alloc_context {
+	/*
+	 * 当前zone中没有page时，应该按照什么顺序去找其它zone
+	 * NUMA架构中，会按照访问延迟(本地远端)对zone进行排序
+	 */
 	struct zonelist *zonelist;
 	nodemask_t *nodemask;
+	/* zonelist的指针 */
 	struct zoneref *preferred_zoneref;
 	int migratetype;
 
@@ -221,8 +226,11 @@ struct alloc_context {
 	 * highest_zoneidx is also used by reclaim/compaction to limit
 	 * the target zone since higher zone than this index cannot be
 	 * usable for this allocation request.
+	 * 最高可用zone索引
+	 * 在进行watermark和lowmem_reserve用来进行检查的
 	 */
 	enum zone_type highest_zoneidx;
+	/* 传播脏页标志，防止本地node的脏页过多 */
 	bool spread_dirty_pages;
 };
 
@@ -323,6 +331,8 @@ __find_buddy_pfn(unsigned long page_pfn, unsigned int order)
  * not the same as @page. The validation is necessary before use it.
  *
  * Return: the found buddy page or NULL if not found.
+ *
+ * 计算page的buddy地址
  */
 static inline struct page *find_buddy_page_pfn(struct page *page,
 			unsigned long pfn, unsigned int order, unsigned long *buddy_pfn)
