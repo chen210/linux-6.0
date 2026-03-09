@@ -146,11 +146,18 @@ static inline bool gfpflags_normal_context(const gfp_t gfp_flags)
 	| 1 << (___GFP_MOVABLE | ___GFP_DMA32 | ___GFP_DMA | ___GFP_HIGHMEM)  \
 )
 
+/*
+ * 低4bit存在zone modifiers
+ */
 static inline enum zone_type gfp_zone(gfp_t flags)
 {
 	enum zone_type z;
+	/* only lowest 4bit */
 	int bit = (__force int) (flags & GFP_ZONEMASK);
-
+	/* 从TABLE中右移对应bit, GFP_ZONES_SHIFT是一个zone type占用的bit数量，
+	 * 值为0，1，2，3中的一个。table向右移动了bit * 2(or 3 ,1 )位，只剩下
+	 * 当前bit代表的zone，然后将当前zone上方的bit清理
+	 */
 	z = (GFP_ZONE_TABLE >> (bit * GFP_ZONES_SHIFT)) &
 					 ((1 << GFP_ZONES_SHIFT) - 1);
 	VM_BUG_ON((GFP_ZONE_BAD >> bit) & 1);

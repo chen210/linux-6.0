@@ -2686,6 +2686,7 @@ static void change_pageblock_range(struct page *pageblock_page,
  * as fragmentation caused by those allocations polluting movable pageblocks
  * is worse than movable allocations stealing from unmovable and reclaimable
  * pageblocks.
+ * 只要order大于pageblock order不论那个zone都可以steal
  */
 static bool can_steal_fallback(unsigned int order, int start_mt)
 {
@@ -2787,6 +2788,7 @@ static void steal_suitable_fallback(struct zone *zone, struct page *page,
 	if (!whole_block)
 		goto single_page;
 
+	/* change pageblcok freelist */
 	free_pages = move_freepages_block(zone, page, start_type,
 						&movable_pages);
 	/*
@@ -2834,6 +2836,9 @@ single_page:
  * If only_stealable is true, this function returns fallback_mt only if
  * we can steal other freepages all together. This would help to reduce
  * fragmentation due to mixed migratetype pages in one pageblock.
+ * only_stealable: true表示只找足够大的pageblock,避免碎片化
+ *		false会计算pageblock中free page的数量多还是被占用的数量多，如果
+ *		pageblock中虽然碎，但是空闲页多，也会进行steal
  */
 int find_suitable_fallback(struct free_area *area, unsigned int order,
 			int migratetype, bool only_stealable, bool *can_steal)
@@ -4168,6 +4173,7 @@ static inline unsigned int gfp_to_alloc_flags_cma(gfp_t gfp_mask,
 						  unsigned int alloc_flags)
 {
 #ifdef CONFIG_CMA
+	/* cma内存可以给其它需求使用的，因此如果buddy可以进行move就是使用 */
 	if (gfp_migratetype(gfp_mask) == MIGRATE_MOVABLE)
 		alloc_flags |= ALLOC_CMA;
 #endif
@@ -4193,7 +4199,9 @@ retry:
 	 * Scan zonelist, looking for a zone with enough free.
 	 * See also __cpuset_node_allowed() comment in kernel/cgroup/cpuset.c.
 	 */
+	/* 查看是否支持fallback，从其它zone借内存 */
 	no_fallback = alloc_flags & ALLOC_NOFRAGMENT;
+	/* 优先分配的zone */
 	z = ac->preferred_zoneref;
 	for_next_zone_zonelist_nodemask(zone, z, ac->highest_zoneidx,
 					ac->nodemask) {
@@ -5316,6 +5324,7 @@ static inline bool prepare_alloc_pages(gfp_t gfp_mask, unsigned int order,
 		unsigned int *alloc_flags)
 {
 	ac->highest_zoneidx = gfp_zone(gfp_mask);
+	/* zonelist保存whether fallback */
 	ac->zonelist = node_zonelist(preferred_nid, gfp_mask);
 	ac->nodemask = nodemask;
 	ac->migratetype = gfp_migratetype(gfp_mask);
